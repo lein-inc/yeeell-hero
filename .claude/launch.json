@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "yeeell-hero",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "18090", "-d", "/Users/yoichikimura/Sites/yeeell-hero"],
+      "port": 18090
+    }
+  ]
+}

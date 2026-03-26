@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YEEELL - Hero Animation</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { height: 800vh; }
+  body {
+    background: #fff;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    height: 800vh;
+  }
+  .hero {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #fff;
+    z-index: 10;
+  }
+  #particleCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+  .hero-content {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    pointer-events: none;
+  }
+  .hero-title {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 900;
+    font-size: clamp(28px, 4.5vw, 56px);
+    letter-spacing: 0.12em;
+    color: #1A1A1A;
+    opacity: 0;
+    animation: titleIn 0.8s ease-out 2s forwards;
+  }
+  @keyframes titleIn {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  .scroll-hint {
+    position: absolute;
+    bottom: 32px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    opacity: 0;
+    animation: hintIn 1s ease-out 3s forwards;
+  }
+  .scroll-hint span {
+    display: block;
+    width: 2px; height: 40px;
+    background: #1A1A1A;
+    margin: 0 auto;
+    animation: line 1.8s ease-in-out infinite;
+    transform-origin: top;
+  }
+  .scroll-copy {
+    position: absolute;
+    z-index: 20;
+    top: 45%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    text-align: center;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    color: #1A1A1A;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    letter-spacing: 0.06em;
+  }
+  @keyframes hintIn { to { opacity: 0.35; } }
+  @keyframes line {
+    0%   { transform: scaleY(0); opacity: 0; }
+    30%  { opacity: 1; }
+    100% { transform: scaleY(1); opacity: 0; }
+  }
+  /* Below-fold hidden — all controlled by canvas */
+  .below-fold {
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <canvas id="particleCanvas"></canvas>
+  <div class="hero-content">
+    <h1 class="hero-title">YEEELL</h1>
+  </div>
+  <div class="scroll-hint"><span></span></div>
+  <div class="scroll-copy" id="scrollCopy">「熱狂でつながる」ブランドコミュニティを創造する</div>
+</section>
+
+<section class="below-fold">
+  <h2>熱狂のコミュニティー</h2>
+</section>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// YEEELL Hero — 熱狂のコミュニティー
+// 3D Rotation + Scroll-driven yellow takeover
+// ═══════════════════════════════════════════════════════
+
+const canvas = document.getElementById('particleCanvas');
+const ctx = canvas.getContext('2d');
+let vw, vh, cx, cy;
+
+function resize() {
+  vw = canvas.offsetWidth;
+  vh = canvas.offsetHeight;
+  canvas.width = vw * devicePixelRatio;
+  canvas.height = vh * devicePixelRatio;
+  cx = vw / 2;
+  cy = vh / 2;
+}
+resize();
+window.addEventListener('resize', () => {
+  resize();
+  particles.forEach(p => { p.homeX = cx + p.hox; p.homeY = cy + p.hoy; });
+});
+
+// ─── Scroll tracking ───
+// Total scroll journey: 6 sections × 1vh each
+// Section 0: 0-1vh    → particles to yellow
+// Section 1: 1vh-2vh  → yellow to #D5D8F0
+// Section 2: 2vh-3vh  → #D5D8F0 to yellow
+// Section 3: 3vh-4vh  → yellow to #DDD5E9
+// Section 4: 4vh-5vh  → #DDD5E9 to yellow (final)
+let scrollProgress = 0;   // 0-1 for initial particle→yellow
+let scrollTotal = 0;      // 0-5 total scroll progress across all sections
+const SECTION_HEIGHT = 1; // each section = 1vh of scroll
+window.addEventListener('scroll', () => {
+  const sectionPx = vh * SECTION_HEIGHT;
+  scrollTotal = Math.min(window.scrollY / sectionPx, 6);
+  scrollProgress = Math.min(scrollTotal, 1); // first section only for particles
+});
+
+// ─── Mouse ───
+let mx = -9999, my = -9999, mActive = false;
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  mx = e.clientX - r.left; my = e.clientY - r.top; mActive = true;
+});
+canvas.addEventListener('mouseleave', () => mActive = false);
+
+// ─── Easings ───
+function easeOutBack(t) {
+  return 1 + 2.70158 * Math.pow(t - 1, 3) + 1.70158 * Math.pow(t - 1, 2);
+}
+function easeInCubic(t) { return t * t * t; }
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+// ─── Particle Config ───
+const TOTAL = 320;
+
+// Cycle timing (ms)
+const GATHER_DUR = 2000;
+const HOLD_DUR   = 6000;
+const BURST_DUR  = 1400;
+const PAUSE_DUR  = 600;
+const CYCLE = GATHER_DUR + HOLD_DUR + BURST_DUR + PAUSE_DUR;
+
+// ─── 3D Rotation for hold phase ───
+// Global rotation angles for the entire cluster
+let rotYAngle = 0;
+let rotXAngle = 0;
+
+function project3D(px, py, pz, rotY, rotX) {
+  // Translate to origin
+  let x = px - cx;
+  let y = py - cy;
+  let z = pz;
+
+  // Rotate around Y axis (horizontal spin)
+  const cosY = Math.cos(rotY);
+  const sinY = Math.sin(rotY);
+  const x1 = x * cosY - z * sinY;
+  const z1 = x * sinY + z * cosY;
+
+  // Rotate around X axis (vertical tilt)
+  const cosX = Math.cos(rotX);
+  const sinX = Math.sin(rotX);
+  const y1 = y * cosX - z1 * sinX;
+  const z2 = y * sinX + z1 * cosX;
+
+  // Perspective projection
+  const perspective = 800;
+  const scale = perspective / (perspective + z2);
+
+  return {
+    x: cx + x1 * scale,
+    y: cy + y1 * scale,
+    scale: scale,
+    z: z2
+  };
+}
+
+// ═══════════════════════════════════════════════════════
+// Particle class
+// ═══════════════════════════════════════════════════════
+class Particle {
+  constructor() {
+    const rnd = Math.random();
+
+    // Type flag for scroll effect
+    this.isYellow = rnd < 0.60;
+
+    if (this.isYellow) {
+      // YELLOW
+      this.r = 238 + Math.random() * 14;
+      this.g = 225 + Math.random() * 15;
+      this.b = 45 + Math.random() * 45;
+      this.baseAlpha = 0.6 + Math.random() * 0.4;
+      const sizeRoll = Math.random();
+      if (sizeRoll < 0.50) this.radius = 1.5 + Math.random() * 4;
+      else if (sizeRoll < 0.82) this.radius = 5 + Math.random() * 7;
+      else if (sizeRoll < 0.95) this.radius = 12 + Math.random() * 8;
+      else this.radius = 20 + Math.random() * 8;
+      this.hasShadow = this.radius > 14;
+    } else if (rnd < 0.78) {
+      // LAVENDER (existing blue-tinted)
+      this.r = 195 + Math.random() * 15;
+      this.g = 198 + Math.random() * 15;
+      this.b = 225 + Math.random() * 15;
+      this.baseAlpha = 0.4 + Math.random() * 0.35;
+      const sizeRoll = Math.random();
+      if (sizeRoll < 0.55) this.radius = 1.5 + Math.random() * 3;
+      else if (sizeRoll < 0.85) this.radius = 4 + Math.random() * 6;
+      else this.radius = 10 + Math.random() * 6;
+      this.hasShadow = false;
+    } else if (rnd < 0.88) {
+      // LIGHT LILAC (添付カラー #DDD5E9 系) — 少なめ
+      this.r = 215 + Math.random() * 15;
+      this.g = 205 + Math.random() * 15;
+      this.b = 225 + Math.random() * 15;
+      this.baseAlpha = 0.35 + Math.random() * 0.35;
+      const sizeRoll = Math.random();
+      if (sizeRoll < 0.50) this.radius = 2 + Math.random() * 4;
+      else if (sizeRoll < 0.85) this.radius = 5 + Math.random() * 7;
+      else this.radius = 12 + Math.random() * 8;
+      this.hasShadow = this.radius > 14;
+    } else {
+      // DARK
+      this.r = 35 + Math.random() * 25;
+      this.g = 35 + Math.random() * 25;
+      this.b = 35 + Math.random() * 25;
+      this.baseAlpha = 0.15 + Math.random() * 0.15;
+      this.radius = 1.5 + Math.random() * 5;
+      this.hasShadow = false;
+    }
+
+    this.alpha = this.baseAlpha;
+
+    // Z-depth for 3D
+    this.z = Math.random();
+    this.z3d = (this.z - 0.5) * 500; // actual z-coordinate for 3D rotation — globe depth
+    this.baseRadius = this.radius;
+    this.zScale = 0.4 + this.z * 0.6;
+    this.zSpeed = 0.5 + this.z * 0.5;
+    this.zAlpha = 0.5 + this.z * 0.5;
+
+    // Home position
+    const a = Math.random() * Math.PI * 2;
+    const d = Math.pow(Math.random(), 0.5) * Math.min(vw, vh) * 0.32;
+    this.hox = Math.cos(a) * d * 1.5;
+    this.hoy = Math.sin(a) * d * 0.7;
+    this.homeX = cx + this.hox;
+    this.homeY = cy + this.hoy;
+
+    // Scatter
+    this.scatterAngle = Math.random() * Math.PI * 2;
+    this.scatterDist = Math.max(vw, vh) * (0.6 + Math.random() * 0.5);
+    this._updateScatter();
+    this.x = this.scX;
+    this.y = this.scY;
+
+    this.delay = Math.random() * 600;
+    this.gatherSpeed = 1000 + Math.random() * 600;
+
+    // Breathing — 控えめな揺れ
+    this.bp = Math.random() * Math.PI * 2;
+    this.bAmp = (6 + Math.random() * 16) * this.zSpeed;
+    this.bSpd = (0.0012 + Math.random() * 0.002) * this.zSpeed;
+
+    // Z oscillation — 控えめ
+    this.zOscPhase = Math.random() * Math.PI * 2;
+    this.zOscAmp = 0.08 + Math.random() * 0.1;
+    this.zOscSpd = 0.0005 + Math.random() * 0.0006;
+
+    this.vx = 0; this.vy = 0;
+    this.burstVx = 0; this.burstVy = 0;
+
+    // For scroll expansion — yellow particles grow HUGE to cover screen
+    this.scrollExpandDelay = Math.random() * 0.6; // stagger the expansion
+    this.scrollTargetRadius = this.isYellow ? (150 + Math.random() * 400) : this.radius;
+    // Spread direction: push outward to cover corners
+    this.scrollSpreadAngle = Math.atan2(this.hoy, this.hox) + (Math.random() - 0.5) * 0.5;
+    this.scrollSpreadDist = 0.2 + Math.random() * 0.4; // fraction of screen size
+  }
+
+  _updateScatter() {
+    this.scatterAngle = Math.random() * Math.PI * 2;
+    this.scatterDist = Math.max(vw, vh) * (0.55 + Math.random() * 0.5);
+    this.scX = cx + Math.cos(this.scatterAngle) * this.scatterDist;
+    this.scY = cy + Math.sin(this.scatterAngle) * this.scatterDist;
+  }
+
+  startBurst() {
+    const angle = Math.atan2(this.y - cy, this.x - cx) + (Math.random() - 0.5) * 0.8;
+    const speed = (14 + Math.random() * 24 + this.radius * 0.5) * this.zSpeed;
+    this.burstVx = Math.cos(angle) * speed;
+    this.burstVy = Math.sin(angle) * speed;
+  }
+
+  prepareGather() {
+    this.scX = this.x;
+    this.scY = this.y;
+    this.delay = Math.random() * 500;
+    this.gatherSpeed = 900 + Math.random() * 500;
+  }
+
+  update(t, cycleTime, phase) {
+    if (phase === 'gather') {
+      const lt = cycleTime - this.delay;
+      if (lt < 0) { this.alpha = this.baseAlpha * 0.5; return; }
+      const p = Math.min(lt / this.gatherSpeed, 1);
+      const e = easeOutBack(p);
+      this.x = this.scX + (this.homeX - this.scX) * e;
+      this.y = this.scY + (this.homeY - this.scY) * e;
+      this.alpha = this.baseAlpha * (0.4 + p * 0.6);
+      this.vx = 0; this.vy = 0;
+
+    } else if (phase === 'hold') {
+      const zOsc = Math.sin(t * this.zOscSpd + this.zOscPhase) * this.zOscAmp;
+      const curZ = Math.max(0.05, Math.min(1, this.z + zOsc));
+      this.zScale = 0.4 + curZ * 0.6;
+      this.zSpeed = 0.5 + curZ * 0.5;
+      this.zAlpha = 0.5 + curZ * 0.5;
+
+      const holdTime = cycleTime - GATHER_DUR;
+      const energy = 0.7 + 0.3 * Math.sin(holdTime * 0.002);
+
+      const bx = Math.cos(t * this.bSpd * this.zSpeed + this.bp) * this.bAmp * energy;
+      const by = Math.sin(t * this.bSpd * this.zSpeed * 1.4 + this.bp + 1.2) * this.bAmp * 0.7 * energy;
+      const jitter = Math.sin(holdTime * 0.004 + this.bp * 3) * 2.5 * this.zSpeed;
+
+      const px = this.hox * (1 + (1 - curZ) * 0.15 * Math.sin(t * 0.0003));
+      const py = this.hoy * (1 + (1 - curZ) * 0.15 * Math.cos(t * 0.00035));
+
+      const tx = cx + px + bx + jitter;
+      const ty = cy + py + by + jitter * 0.6;
+      this.vx += (tx - this.x) * 0.06;
+      this.vy += (ty - this.y) * 0.06;
+      this.vx *= 0.85; this.vy *= 0.85;
+      this.x += this.vx; this.y += this.vy;
+      this.alpha = this.baseAlpha * this.zAlpha;
+
+      // Update z3d for 3D rotation
+      this.z3d = (curZ - 0.5) * 300;
+
+    } else if (phase === 'burst') {
+      this.x += this.burstVx;
+      this.y += this.burstVy;
+      this.burstVx *= 0.98;
+      this.burstVy *= 0.98;
+      this.alpha = this.baseAlpha;
+
+    } else {
+      this.alpha = 0;
+    }
+
+    // Mouse repulsion
+    if (mActive && (phase === 'gather' || phase === 'hold')) {
+      const dx = this.x - mx, dy = this.y - my;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < 22500 && dSq > 1) {
+        const dist = Math.sqrt(dSq);
+        const f = (1 - dist / 150) * 16;
+        this.x += (dx / dist) * f;
+        this.y += (dy / dist) * f;
+      }
+    }
+  }
+
+  getDrawParams(phase, scrollProg) {
+    let drawX = this.x;
+    let drawY = this.y;
+    let drawRadius = this.baseRadius * this.zScale;
+    let drawAlpha = this.alpha;
+    let sortZ = this.z;
+
+    // ─── 3D rotation during hold ───
+    if (phase === 'hold' && scrollProg < 0.3) {
+      const proj = project3D(this.x, this.y, this.z3d, rotYAngle, rotXAngle);
+      drawX = proj.x;
+      drawY = proj.y;
+      drawRadius *= proj.scale;
+      drawAlpha *= Math.max(0.3, proj.scale);
+      sortZ = proj.z;
+    }
+
+    // ─── Scroll-based expansion (yellow grows HUGE to fill screen) ───
+    if (scrollProg > 0.02 && this.isYellow) {
+      const adjustedProg = Math.max(0, (scrollProg - this.scrollExpandDelay * 0.15) / 0.85);
+      const expandProg = easeInOutCubic(Math.min(adjustedProg, 1));
+
+      // During burst/pause, pull particles back toward home position
+      drawX = this.x + (this.homeX - this.x) * expandProg;
+      drawY = this.y + (this.homeY - this.y) * expandProg;
+
+      // Massive radius growth
+      drawRadius = this.baseRadius * this.zScale + (this.scrollTargetRadius - this.baseRadius * this.zScale) * expandProg;
+
+      // Full opacity as they grow
+      drawAlpha = this.baseAlpha + (1 - this.baseAlpha) * expandProg;
+
+      // Push outward to cover corners and edges
+      const spreadMag = expandProg * Math.max(vw, vh) * this.scrollSpreadDist;
+      drawX += Math.cos(this.scrollSpreadAngle) * spreadMag;
+      drawY += Math.sin(this.scrollSpreadAngle) * spreadMag;
+    }
+
+    // Non-yellow particles fade out quickly on scroll
+    if (scrollProg > 0 && !this.isYellow) {
+      drawAlpha *= Math.max(0, 1 - scrollProg * 4);
+    }
+
+    return { drawX, drawY, drawRadius, drawAlpha, sortZ };
+  }
+
+  draw(phase, scrollProg) {
+    const { drawX, drawY, drawRadius, drawAlpha } = this.getDrawParams(phase, scrollProg);
+    if (drawAlpha < 0.01) return;
+    if (drawRadius < 0.5) return;
+
+    const col = `rgba(${this.r|0},${this.g|0},${this.b|0},${drawAlpha})`;
+    if (this.hasShadow && drawRadius > 10) {
+      ctx.save();
+      ctx.shadowColor = `rgba(${this.r|0},${this.g|0},${this.b|0},${0.3 * (this.zAlpha || 1)})`;
+      ctx.shadowBlur = drawRadius * 1.2;
+      ctx.beginPath();
+      ctx.arc(drawX, drawY, drawRadius, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.beginPath();
+      ctx.arc(drawX, drawY, drawRadius, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+    }
+  }
+}
+
+// Create & sort by z-depth
+const particles = [];
+for (let i = 0; i < TOTAL; i++) particles.push(new Particle());
+particles.sort((a, b) => a.z - b.z);
+
+// ─── Connection lines ───
+function drawConnections() {
+  if (scrollProgress > 0.3) return;
+  const max = 55, maxSq = max * max;
+  const connAlpha = 1 - scrollProgress / 0.3;
+  ctx.lineWidth = 0.6;
+  for (let i = 0; i < particles.length; i++) {
+    const pi = particles[i];
+    if (pi.alpha < 0.25) continue;
+    for (let j = i + 1; j < particles.length; j++) {
+      const pj = particles[j];
+      if (pj.alpha < 0.25) continue;
+      const dx = pi.x - pj.x, dy = pi.y - pj.y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < maxSq) {
+        const a = (1 - Math.sqrt(dSq) / max) * 0.12 * connAlpha;
+        ctx.beginPath();
+        ctx.moveTo(pi.x, pi.y);
+        ctx.lineTo(pj.x, pj.y);
+        ctx.strokeStyle = `rgba(220, 216, 60, ${a})`;
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+// ─── Glow ───
+function drawGlow(t, intensity) {
+  if (intensity < 0.01) return;
+  const pulse = 0.7 + Math.sin(t * 0.0005) * 0.2;
+  const r = Math.min(vw, vh) * 0.5;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  const a = intensity * pulse;
+  g.addColorStop(0,   `rgba(242, 238, 91, ${0.22 * a})`);
+  g.addColorStop(0.3, `rgba(242, 238, 91, ${0.09 * a})`);
+  g.addColorStop(0.6, `rgba(200, 204, 232, ${0.04 * a})`);
+  g.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, vw, vh);
+}
+
+// ─── Sparkles ───
+const sparkles = [];
+function tickSparkles() {
+  if (scrollProgress > 0.3) return;
+  if (Math.random() < 0.1) {
+    const a = Math.random() * Math.PI * 2;
+    const d = Math.random() * Math.min(vw, vh) * 0.3;
+    sparkles.push({
+      x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d,
+      r: 1.5 + Math.random() * 4, life: 1, decay: 0.015 + Math.random() * 0.025
+    });
+  }
+  for (let i = sparkles.length - 1; i >= 0; i--) {
+    const s = sparkles[i];
+    s.life -= s.decay;
+    if (s.life <= 0) { sparkles.splice(i, 1); continue; }
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r * s.life, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 250, 100, ${s.life * 0.85})`;
+    ctx.fill();
+  }
+}
+
+// ─── Burst flash ───
+function drawBurstFlash(progress) {
+  if (progress < 0 || progress > 0.5) return;
+  const i = Math.sin(progress * Math.PI * 2) * 0.3;
+  if (i <= 0) return;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(vw, vh) * 0.4);
+  g.addColorStop(0, `rgba(242, 238, 91, ${i})`);
+  g.addColorStop(1, 'rgba(242, 238, 91, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, vw, vh);
+}
+
+// ─── Phase management ───
+let lastPhase = '';
+const t0 = performance.now();
+
+function getPhase(cycleTime) {
+  if (cycleTime < GATHER_DUR) return 'gather';
+  if (cycleTime < GATHER_DUR + HOLD_DUR) return 'hold';
+  if (cycleTime < GATHER_DUR + HOLD_DUR + BURST_DUR) return 'burst';
+  return 'pause';
+}
+
+// ─── Color sequence overlay for scroll ───
+// Color definitions
+const COL_YELLOW  = [242, 238, 91];
+const COL_BLUE    = [213, 216, 240];  // #D5D8F0
+const COL_LILAC   = [221, 213, 233];  // #DDD5E9
+
+const COL_WHITE   = [255, 255, 255];
+
+// Color sequence: yellow → blue → yellow → lilac → white → yellow
+const colorSequence = [
+  COL_YELLOW,  // section 0→1: particles to this
+  COL_BLUE,    // section 1→2: wipe to this from bottom
+  COL_YELLOW,  // section 2→3: wipe to this from bottom
+  COL_LILAC,   // section 3→4: wipe to this from bottom
+  COL_WHITE,   // section 4→5: wipe to this from bottom
+  COL_YELLOW   // section 5→6: wipe to this from bottom (final)
+];
+
+function drawColorOverlay() {
+  if (scrollTotal < 0.5) return;
+
+  if (scrollTotal <= 1) {
+    // Section 0: particle expansion → yellow fill (fade in)
+    const alpha = easeInOutCubic((scrollTotal - 0.5) / 0.5);
+    ctx.fillStyle = `rgba(${COL_YELLOW[0]}, ${COL_YELLOW[1]}, ${COL_YELLOW[2]}, ${alpha})`;
+    ctx.fillRect(0, 0, vw, vh);
+  } else {
+    // Sections 1-5: stripe wipe from bottom
+    const st = Math.min(scrollTotal, 5.999);
+    const currentSection = Math.floor(st); // 1,2,3,4,5
+    const sectionProg = st - currentSection;
+
+    // Draw all completed sections as full background (bottom layer = current base)
+    const baseIndex = Math.min(currentSection - 1, 4);
+    const baseCol = colorSequence[baseIndex];
+    ctx.fillStyle = `rgb(${baseCol[0]|0}, ${baseCol[1]|0}, ${baseCol[2]|0})`;
+    ctx.fillRect(0, 0, vw, vh);
+
+    // Draw the incoming color as a stripe rising from bottom
+    if (sectionProg > 0) {
+      const nextIndex = Math.min(currentSection, 5);
+      const nextCol = colorSequence[nextIndex];
+      const wipeHeight = easeInOutCubic(sectionProg) * vh;
+      ctx.fillStyle = `rgb(${nextCol[0]|0}, ${nextCol[1]|0}, ${nextCol[2]|0})`;
+      ctx.fillRect(0, vh - wipeHeight, vw, wipeHeight);
+    }
+  }
+}
+
+// ─── Title fade on scroll ───
+const titleEl = document.querySelector('.hero-title');
+const hintEl = document.querySelector('.scroll-hint');
+const scrollCopyEl = document.getElementById('scrollCopy');
+
+// ═══════════════════════════════════════
+// Main loop
+// ═══════════════════════════════════════
+function frame(now) {
+  const elapsed = now - t0;
+  const cycleTime = elapsed % CYCLE;
+  const phase = getPhase(cycleTime);
+
+  // ─── Phase transitions ───
+  if (phase !== lastPhase) {
+    if (phase === 'burst') {
+      particles.forEach(p => p.startBurst());
+    } else if (phase === 'gather' && lastPhase === 'pause') {
+      particles.forEach(p => p.prepareGather());
+    } else if (phase === 'hold' && lastPhase === 'gather') {
+      particles.forEach(p => {
+        p.x = p.homeX; p.y = p.homeY;
+        p.alpha = p.baseAlpha;
+        p.vx = 0; p.vy = 0;
+      });
+    }
+    lastPhase = phase;
+  }
+
+  // ─── 3D Globe Rotation ───
+  if (phase === 'hold') {
+    const holdTime = cycleTime - GATHER_DUR;
+    const holdProg = holdTime / HOLD_DUR;
+
+    // Smooth ramp-up and ramp-down
+    let rotIntensity;
+    if (holdProg < 0.15) {
+      rotIntensity = easeOutCubic(holdProg / 0.15);
+    } else if (holdProg > 0.85) {
+      rotIntensity = easeInCubic((1 - holdProg) / 0.15);
+    } else {
+      rotIntensity = 1;
+    }
+
+    // Continuous globe rotation — gentle revolution during hold
+    const spinSpeed = (holdTime / HOLD_DUR) * Math.PI * 1.5;
+    rotYAngle = spinSpeed * rotIntensity;
+    // X-axis: gentle tilt that slowly oscillates
+    rotXAngle = Math.sin(holdTime * 0.0008) * 0.35 * rotIntensity;
+  } else {
+    rotYAngle *= 0.92;
+    rotXAngle *= 0.92;
+  }
+
+  // ─── Render ───
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.clearRect(0, 0, vw, vh);
+
+  // Glow intensity
+  let glowInt = 1;
+  if (phase === 'burst') {
+    glowInt = 1 - easeInCubic(Math.min((cycleTime - GATHER_DUR - HOLD_DUR) / BURST_DUR, 1));
+  } else if (phase === 'pause') {
+    glowInt = 0;
+  } else if (phase === 'gather') {
+    glowInt = easeOutCubic(Math.min(cycleTime / GATHER_DUR, 1));
+  }
+  if (scrollProgress < 0.5) drawGlow(now, glowInt * (1 - scrollProgress * 2));
+
+  // Burst flash
+  if (phase === 'burst' && scrollProgress < 0.2) {
+    const bp = (cycleTime - GATHER_DUR - HOLD_DUR) / BURST_DUR;
+    drawBurstFlash(bp);
+  }
+
+  // Update particles
+  particles.forEach(p => p.update(now, cycleTime, phase));
+
+  // During hold with 3D rotation, sort by projected z for correct layering
+  if (phase === 'hold' && scrollProgress < 0.3) {
+    const sorted = particles.slice().sort((a, b) => {
+      const pa = project3D(a.x, a.y, a.z3d, rotYAngle, rotXAngle);
+      const pb = project3D(b.x, b.y, b.z3d, rotYAngle, rotXAngle);
+      return pa.z - pb.z;
+    });
+
+    drawConnections();
+    tickSparkles();
+    sorted.forEach(p => p.draw(phase, scrollProgress));
+  } else {
+    if (phase === 'hold') {
+      drawConnections();
+      tickSparkles();
+    }
+    particles.forEach(p => p.draw(phase, scrollProgress));
+  }
+
+  // Color sequence overlay on scroll
+  drawColorOverlay();
+
+  // Title and hint opacity based on scroll — override CSS animation
+  if (titleEl) {
+    if (scrollProgress > 0.01) {
+      titleEl.style.animation = 'none';
+      titleEl.style.opacity = Math.max(0, 1 - scrollProgress * 5);
+    } else {
+      // Restore title when back at top
+      titleEl.style.animation = '';
+      titleEl.style.opacity = '';
+    }
+  }
+  if (hintEl) {
+    if (scrollProgress > 0.01) {
+      hintEl.style.animation = 'none';
+      hintEl.style.opacity = Math.max(0, 0.35 - scrollProgress * 3);
+    } else {
+      hintEl.style.animation = '';
+      hintEl.style.opacity = '';
+    }
+  }
+  // Show copy text — fade in once, then stay visible
+  if (scrollCopyEl) {
+    if (scrollTotal > 0.7) {
+      const copyAlpha = Math.min(easeInOutCubic((scrollTotal - 0.7) / 0.3), 1);
+      scrollCopyEl.style.opacity = copyAlpha;
+    } else {
+      scrollCopyEl.style.opacity = 0;
+    }
+  }
+
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
